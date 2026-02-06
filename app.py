@@ -1,6 +1,9 @@
+#Define Clinical Performance Dashboard
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+from datetime import datetime, timedelta
+import requests
 
 # Page configuration
 st.set_page_config(
@@ -34,6 +37,14 @@ st.markdown("""
         border-radius: 0.5rem;
         padding: 1rem;
         text-align: center;
+    }
+    .weather-card {
+        background-color: #f8f9fa;
+        border: 2px solid #dee2e6;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        text-align: center;
+        margin: 0.5rem;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -129,6 +140,78 @@ def create_clinical_performance_chart(
     )
 
     return fig
+
+def get_weather_forecast():
+    """Fetch 7 day weather forecast for New York City using Open-Meteo API (free, no API key needed)"""
+    try:
+        # New York City coordinates
+        latitude = 40.7128
+        longitude = -74.0060
+        
+        # Open-Meteo API endpoint (free, no API key required)
+        url = f"https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode",
+            "temperature_unit": "fahrenheit",
+            "timezone": "America/New_York",
+            "forecast_days": 7
+        }
+        
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Parse the data
+        daily = data['daily']
+        forecast = []
+        
+        # Weather code mapping
+        weather_codes = {
+            0: "☀️ Clear",
+            1: "🌤️ Mainly Clear",
+            2: "⛅ Partly Cloudy",
+            3: "☁️ Overcast",
+            45: "🌫️ Foggy",
+            48: "🌫️ Foggy",
+            51: "🌦️ Light Drizzle",
+            53: "🌧️ Drizzle",
+            55: "🌧️ Heavy Drizzle",
+            61: "🌧️ Light Rain",
+            63: "🌧️ Rain",
+            65: "🌧️ Heavy Rain",
+            71: "🌨️ Light Snow",
+            73: "❄️ Snow",
+            75: "❄️ Heavy Snow",
+            77: "🌨️ Snow Grains",
+            80: "🌦️ Light Showers",
+            81: "🌧️ Showers",
+            82: "⛈️ Heavy Showers",
+            85: "🌨️ Light Snow Showers",
+            86: "❄️ Snow Showers",
+            95: "⛈️ Thunderstorm",
+            96: "⛈️ Thunderstorm with Hail",
+            99: "⛈️ Severe Thunderstorm"
+        }
+        
+        for i in range(len(daily['time'])):
+            date = datetime.strptime(daily['time'][i], '%Y-%m-%d')
+            weather_code = daily['weathercode'][i]
+            forecast.append({
+                'date': date,
+                'day_name': date.strftime('%A'),
+                'date_str': date.strftime('%b %d'),
+                'temp_max': daily['temperature_2m_max'][i],
+                'temp_min': daily['temperature_2m_min'][i],
+                'precipitation': daily['precipitation_sum'][i],
+                'condition': weather_codes.get(weather_code, "🌤️ Partly Cloudy")
+            })
+        
+        return forecast
+    except Exception as e:
+        st.error(f"Error fetching weather data: {str(e)}")
+        return None
 
 def prepare_dataframe(df):
     """Automatically detect and rename columns"""
@@ -245,11 +328,6 @@ def main():
     
     st.sidebar.header("📊 Chart Options")
     
-    chart_color = st.sidebar.color_picker(
-        "Choose chart color",
-        "#35a7c4"
-    )
-    
     sort_order = st.sidebar.radio(
         "Sort bars by:",
         ["Metric Value (Ascending)", "Metric Value (Descending)", "Clinic Name (A-Z)"]
@@ -352,38 +430,6 @@ def main():
     
     st.divider()
     
-    # Performance Summary
-    st.header("📈 Performance Summary")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    BENCHMARK = 85  # Benchmark set to 85%
-    
-    if 'Visits Achieved %' in df_filtered.columns:
-        avg_visits = df_filtered['Visits Achieved %'].mean()
-        col1.metric(
-            "Average Visits Achievement",
-            f"{avg_visits:.1f}%",
-            delta=f"{avg_visits - BENCHMARK:.1f}% vs benchmark (85%)"
-        )
-    
-    if 'New Patients Achieved %' in df_filtered.columns:
-        avg_new_patients = df_filtered['New Patients Achieved %'].mean()
-        col2.metric(
-            "Average New Patients Achievement",
-            f"{avg_new_patients:.1f}%",
-            delta=f"{avg_new_patients - BENCHMARK:.1f}% vs benchmark (85%)"
-        )
-    
-    if 'Utilization %' in df_filtered.columns:
-        avg_utilization = df_filtered['Utilization %'].mean()
-        col3.metric(
-            "Average Utilization",
-            f"{avg_utilization:.1f}%",
-            delta=f"{avg_utilization - BENCHMARK:.1f}% vs benchmark (85%)"
-        )
-    
-    st.divider()
     
     # Determine sort parameters
     if sort_order == "Metric Value (Ascending)":
@@ -397,11 +443,12 @@ def main():
         sort_by_metric = False
     
     # Tabs for different metrics
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Visits Achievement",
         "👥 New Patients Achievement",
         "⏱️ Utilization",
-        "📋 Detailed Comparison"
+        "📋 Detailed Comparison",
+        "🌤️ Weather Forecast (NYC)"
     ])
     
     with tab1:
@@ -412,7 +459,6 @@ def main():
                 df_filtered,
                 'Visits Achieved %',
                 'Visits Achievement',
-                color=chart_color,
                 sort_by=sort_by,
                 ascending=sort_ascending
             )
@@ -438,7 +484,6 @@ def main():
                 df_filtered,
                 'New Patients Achieved %',
                 'New Patients Achievement',
-                color=chart_color,
                 sort_by=sort_by,
                 ascending=sort_ascending
             )
@@ -464,7 +509,6 @@ def main():
                 df_filtered,
                 'Utilization %',
                 'Utilization',
-                color=chart_color,
                 sort_by=sort_by,
                 ascending=sort_ascending
             )
@@ -514,6 +558,50 @@ def main():
             use_container_width=True,
             hide_index=True
         )
+    
+    with tab5:
+        st.subheader("7 Day Weather Forecast for New York City")
+        st.markdown("*Plan your clinic operations and patient visits with weather insights*")
+        
+        with st.spinner("🌤️ Fetching weather data..."):
+            forecast = get_weather_forecast()
+        
+        if forecast:
+            # Display forecast in cards
+            cols = st.columns(7)
+            
+            for i, day in enumerate(forecast):
+                with cols[i]:
+                    temp_max_c = (day['temp_max'] - 32) * 5 / 9
+                    temp_min_c = (day['temp_min'] - 32) * 5 / 9
+                    st.markdown(f"""
+                        <div class="weather-card">
+                            <h4 style="margin: 0;font-size: 0.95rem; font-weight: bold;font-weight: 600; text-align: center;">{day['day_name']}</h3>
+                            <p style="margin: 0.5rem 0; font-size: 0.9rem;">{day['date_str']}</p>
+                            <div style="font-size: 2rem; margin: 1rem 0;">{day['condition'].split()[0]}</div>
+                            <p style="margin: 0; font-weight: bold; font-size: 1.2rem;">
+                                {temp_max_c:.0f}°C / {temp_min_c:.0f}°C
+                            </p>
+                            <p style="margin: 0.5rem 0; font-size: 0.85rem;">
+                                {day['condition'].split(' ', 1)[1] if len(day['condition'].split()) > 1 else ''}
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
+            
+            st.divider()
+                        
+            # Weather insights
+            st.subheader("📌 Weather Insights for Clinic Operations")
+            
+            rainy_days = [day for day in forecast if day['precipitation'] > 0.1]
+                        
+            insight_cols = st.columns(2)
+            
+            with insight_cols[0]:
+                if rainy_days:
+                    st.info(f"🌧️ **{len(rainy_days)} rainy day(s)** expected\n\nConsider patient transportation needs")
+                else:
+                    st.success("☀️ **No significant rain** expected\n\nGood week for travel")
     
     # Optional data table
     if show_data_table:
